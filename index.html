@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Vanity Address Pro</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.8.1/dist/ethers.umd.min.js"></script>
+<style>
+body{margin:0;background:#0b1220;color:#fff;font-family:Arial}
+.center{display:flex;justify-content:center;align-items:center;height:100vh}
+.card{background:#111827;padding:30px;border-radius:10px;width:360px}
+input,button{width:100%;padding:10px;margin-top:10px;border-radius:6px;border:none}
+button{background:#00ff99;font-weight:bold;cursor:pointer}
+.worker{background:#1f2937;height:20px;margin:10px 0;border-radius:4px;overflow:hidden}
+.bar{height:100%;width:0%;background:#22c55e}
+small{color:#aaa}
+.hidden{display:none}
+</style>
+</head>
+
+<body>
+
+<!-- 登录页 -->
+<div id="login" class="center">
+  <div class="card">
+    <h2>验证码登录</h2>
+    <canvas id="captcha" width="120" height="40"></canvas>
+    <input id="captchaInput" placeholder="输入验证码">
+    <button onclick="login()">登录</button>
+    <small>必须通过验证码才能进入</small>
+  </div>
+</div>
+
+<!-- 控制台 -->
+<div id="dashboard" class="hidden">
+  <div style="padding:20px;max-width:600px;margin:auto">
+    <h1>靓地址生成控制台</h1>
+
+    <input id="prefix" value="0x888888" placeholder="靓号前缀（如 0x888888）">
+
+    <div id="workers"></div>
+
+    <button onclick="start()">启动 5 个靓号进程</button>
+
+    <h3>🎯 找到的靓号</h3>
+    <pre id="result"></pre>
+  </div>
+</div>
+
+<script>
+/* ================= 验证码 ================= */
+let captchaText = "";
+
+function drawCaptcha() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  captchaText = "";
+  for (let i = 0; i < 4; i++) captchaText += chars[Math.floor(Math.random()*chars.length)];
+
+  const c = document.getElementById("captcha");
+  const ctx = c.getContext("2d");
+  ctx.clearRect(0,0,c.width,c.height);
+  ctx.fillStyle="#0b1220";ctx.fillRect(0,0,c.width,c.height);
+  ctx.font="22px Arial";ctx.fillStyle="#00ff99";
+  ctx.fillText(captchaText,15,28);
+}
+drawCaptcha();
+document.getElementById("captcha").onclick = drawCaptcha;
+
+function login(){
+  if(captchaInput.value.toUpperCase() !== captchaText){
+    alert("验证码错误"); drawCaptcha(); return;
+  }
+  login.classList.add("hidden");
+  dashboard.classList.remove("hidden");
+}
+
+/* ================= Worker 代码 ================= */
+const workerCode = `
+self.onmessage = async e => {
+  const prefix = e.data.prefix.toLowerCase();
+  let tested = 0;
+
+  while(true){
+    const w = ethers.Wallet.createRandom();
+    tested++;
+
+    if(w.address.toLowerCase().startsWith(prefix)){
+      self.postMessage({
+        found:true,
+        tested,
+        address:w.address,
+        privateKey:w.privateKey,
+        mnemonic:w.mnemonic.phrase
+      });
+      break;
+    }
+
+    if(tested % 3000 === 0){
+      self.postMessage({found:false,tested});
+    }
+  }
+};
+`;
+
+const blob = new Blob([workerCode],{type:"application/javascript"});
+const workerURL = URL.createObjectURL(blob);
+
+let workers = [];
+
+/* ================= 启动 ================= */
+function start(){
+  document.getElementById("workers").innerHTML="";
+  document.getElementById("result").textContent="";
+  workers.forEach(w=>w.terminate());
+  workers = [];
+
+  const prefix = document.getElementById("prefix").value;
+
+  for(let i=0;i<5;i++){
+    const div = document.createElement("div");
+    div.className="worker";
+    const bar = document.createElement("div");
+    bar.className="bar";
+    div.appendChild(bar);
+    workersDiv.appendChild(div);
+
+    const w = new Worker(workerURL);
+    workers.push(w);
+
+    w.onmessage = e => {
+      if(e.data.found){
+        bar.style.width="100%";
+        result.textContent =
+          "地址: "+e.data.address+"\\n"+
+          "私钥: "+e.data.privateKey+"\\n"+
+          "助记词: "+e.data.mnemonic;
+        workers.forEach(x=>x.terminate());
+      }else{
+        bar.style.width = Math.min(100, e.data.tested/2000) + "%";
+      }
+    };
+
+    w.postMessage({prefix});
+  }
+}
+</script>
+
+</body>
+</html>
